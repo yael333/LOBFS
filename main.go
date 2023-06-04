@@ -2,7 +2,9 @@ package main
 
 import (
 	"os"
-	"github.com/konata-chan404/LOBS/babel"
+	"fmt"
+	
+	"github.com/konata-chan404/LOBFS/babel"
 	"github.com/winfsp/cgofuse/fuse"
 )
 
@@ -61,6 +63,18 @@ func (self *Hellofs) Readdir(path string,
 }
 
 func main() {
+	lib := make(babel.Library)
+	loc := babel.NewLocation(1, 2, 3, 4, 5)
+	page, err := lib.GetPageAtLocation(loc)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+
+	fmt.Println(page)
+	
+	vol := lib.GetHexagon(1).GetWall(2).GetShelf(3).GetVolume(loc)
+	fmt.Println("Volume name:", vol.Name)
 
 	hellofs := &Hellofs{}
 	host := fuse.NewFileSystemHost(hellofs)
