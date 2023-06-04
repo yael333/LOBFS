@@ -2,123 +2,149 @@ package babel
 
 import (
 	"errors"
-	"fmt"
+	"math/big"
 	"math/rand"
+	"strings"
 )
 
 const (
-	VolumeSize  = 410
-	PageSize    = 3200
-	ShelfSize   = 32
-	WallSize    = 5
-	HexagonSize = 4
-	Chars       = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.-;:_ "
-	CharCount   = len(Chars)
+	Chars             = "abcdefghijklmnopqrstuvwxyz, ."
+	HexBase           = 36
+	LocationMultiplier = 1000
+	PageMultiplier    = 1 << 62
+	MaxLocationValue  = 1000
+	PaddingLength     = 10
 )
 
+var (
+	charToNum map[rune]*big.Int
+	numToChar map[int32]rune
+)
+
+type Hex string
+
 type Location struct {
-	Hexagon int
-	Wall    int
-	Shelf   int
-	Volume  int
-	Page    int
+	Wall   int
+	Shelf  int
+	Volume int
+	Page   int
 }
 
-type Volume struct {
-	Name  string
-	Pages [VolumeSize]string
+type Page string
+
+type Library struct {
+	rand *rand.Rand
 }
 
-type Shelf [ShelfSize]*Volume
-type Wall [WallSize]*Shelf
-type Hexagon [HexagonSize]*Wall
-type Library map[int]*Hexagon // int can be replaced with other identifier type
+var ErrInvalidChar = errors.New("invalid character")
 
-// NewLocation constructs a new Location instance based on the given values.
-func NewLocation(h, w, s, v, p int) Location {
-	return Location{h, w, s, v, p}
-}
-
-func (l Location) Seed() int64 {
-	return int64(l.Hexagon<<24 | l.Wall<<16 | l.Shelf<<8 | l.Volume | l.Page)
-}
-
-func (l Location) String() string {
-	return fmt.Sprintf("%d-w%d-s%d-v%d-p%d", l.Hexagon, l.Wall, l.Shelf, l.Volume, l.Page)
-}
-
-// NewVolume returns a new volume with pages generated based on the location.
-func NewVolume(l Location) *Volume {
-	v := &Volume{Name: l.String()}
-	for i := 0; i < VolumeSize; i++ {
-		pageLoc := Location{l.Hexagon, l.Wall, l.Shelf, l.Volume, i}
-		v.Pages[i] = GeneratePage(pageLoc.Seed())
+func init() {
+	charToNum = make(map[rune]*big.Int, len(Chars))
+	numToChar = make(map[int32]rune, len(Chars))
+	for i, c := range Chars {
+		charToNum[c] = big.NewInt(int64(i))
+		numToChar[int32(i)] = c
 	}
-	return v
 }
 
-func GeneratePage(seed int64) string {
-	rng := rand.New(rand.NewSource(seed))
-	var page string
-	for i := 0; i < PageSize; i++ {
-		page += string(Chars[rng.Intn(CharCount)])
-	}
-	return page
-}
-
-// GetHexagon retrieves the hexagon with the given ID, creating it if it doesn't exist.
-func (lib *Library) GetHexagon(id int) *Hexagon {
-	h, ok := (*lib)[id]
+func (h Hex) ToBigInt() (*big.Int, error) {
+	n := new(big.Int)
+	_, ok := n.SetString(string(h), HexBase)
 	if !ok {
-		h = &Hexagon{}
-		(*lib)[id] = h
+		return nil, ErrInvalidChar
 	}
-	return h
+	return n, nil
 }
 
-// GetWall retrieves the wall with the given ID from the hexagon, creating it if it doesn't exist.
-func (h *Hexagon) GetWall(id int) *Wall {
-	w := (*h)[id]
-	if w == nil {
-		w = &Wall{}
-		(*h)[id] = w
-	}
-	return w
+func (l Location) ToBigInt() *big.Int {
+	n := big.NewInt(int64(l.Wall))
+	n.Mul(n, big.NewInt(LocationMultiplier))
+	n.Add(n, big.NewInt(int64(l.Shelf)))
+	n.Mul(n, big.NewInt(LocationMultiplier))
+	n.Add(n, big.NewInt(int64(l.Volume)))
+	n.Mul(n, big.NewInt(LocationMultiplier))
+	n.Add(n, big.NewInt(int64(l.Page)))
+	return n
 }
 
-// GetShelf retrieves the shelf with the given ID from the wall, creating it if it doesn't exist.
-func (w *Wall) GetShelf(id int) *Shelf {
-	s := (*w)[id]
-	if s == nil {
-		s = &Shelf{}
-		(*w)[id] = s
+func (p Page) ToBigInt() (*big.Int, error) {
+	n := new(big.Int)
+	for _, c := range p {
+		v, ok := charToNum[c]
+		if !ok {
+			return nil, ErrInvalidChar
+		}
+		n.Mul(n, big.NewInt(int64(len(Chars))))
+		n.Add(n, v)
 	}
-	return s
+	return n, nil
 }
 
-// GetVolume retrieves the volume with the given ID from the shelf, creating it if it doesn't exist.
-func (s *Shelf) GetVolume(l Location) *Volume {
-	v := (*s)[l.Volume]
-	if v == nil {
-		v = NewVolume(l)
-		(*s)[l.Volume] = v
+func (p *Page) FromBigInt(n *big.Int) {
+	var s strings.Builder
+	mod := new(big.Int)
+	for n.BitLen() > 0 {
+		n, mod = n.DivMod(n, big.NewInt(int64(len(Chars))), mod)
+		s.WriteRune(numToChar[int32(mod.Int64())])
 	}
-	return v
+	*p = Page(s.String())
 }
 
-// GetPage retrieves the page with the given ID from the volume.
-func (v *Volume) GetPage(id int) (string, error) {
-	if id < 0 || id >= VolumeSize {
-		return "", errors.New("invalid page number")
-	}
-	return v.Pages[id], nil
+func NewLibrary(seed int64) *Library {
+	return &Library{rand: rand.New(rand.NewSource(seed))}
 }
 
-// GetPageAtLocation retrieves the page at the given location in the library.
-func (lib *Library) GetPageAtLocation(l Location) (string, error) {
-	h := lib.GetHexagon(l.Hexagon)
-	w := h.GetWall(l.Wall)
-	s := w.GetShelf(l.Shelf)
-	v := s.GetVolume(l)
-	return v.GetPage(l.Page)
+func (lib *Library) GeneratePage(h Hex, l Location) (Page, error) {
+	hexNum, err := h.ToBigInt()
+	if err != nil {
+		return "", err
+	}
+	locNum := l.ToBigInt()
+
+	pageNum := new(big.Int).Mul(locNum, big.NewInt(PageMultiplier))
+	pageNum.Add(pageNum, hexNum)
+
+	p := new(Page)
+	p.FromBigInt(pageNum)
+	return *p, nil
 }
+
+func (lib *Library) SearchPage(text string) (h Hex, l Location, p Page, err error) {
+	text = lib.padText(text)
+
+	p = Page(text)
+	pageNum, err := p.ToBigInt()
+	if err != nil {
+		return
+	}
+
+	l = Location{
+		Wall:   lib.rand.Intn(MaxLocationValue),
+		Shelf:  lib.rand.Intn(MaxLocationValue),
+		Volume: lib.rand.Intn(MaxLocationValue),
+		Page:   lib.rand.Intn(MaxLocationValue),
+	}
+	locNum := l.ToBigInt()
+
+	hexNum := new(big.Int).Add(pageNum, new(big.Int).Mul(locNum, big.NewInt(PageMultiplier)))
+	h = Hex(hexNum.Text(HexBase))
+
+	return
+}
+
+
+
+func (lib *Library) randString(n int) string {
+	var s strings.Builder
+	for i := 0; i < n; i++ {
+		s.WriteRune(rune(Chars[lib.rand.Intn(len(Chars))]))
+	}
+	return s.String()
+}
+
+func (lib *Library) padText(text string) string {
+	prefix := lib.randString(PaddingLength)
+	suffix := lib.randString(PaddingLength)
+	return prefix + text + suffix
+}
+

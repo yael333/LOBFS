@@ -1,7 +1,7 @@
 package main
 
 import (
-	"os"
+	// "os"
 	"fmt"
 	
 	"github.com/konata-chan404/LOBFS/babel"
@@ -63,20 +63,22 @@ func (self *Hellofs) Readdir(path string,
 }
 
 func main() {
-	lib := make(babel.Library)
-	loc := babel.NewLocation(1, 2, 3, 4, 5)
-	page, err := lib.GetPageAtLocation(loc)
+	lib := babel.NewLibrary(42)
+
+	text := "hello world"
+	hex, loc, page, err := lib.SearchPage(text)
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		panic(err)
 	}
+	fmt.Printf("Searched text: %q\nHex: %s\nLocation: %+v\nPage: %s\n", text, hex, loc, page)
 
-	fmt.Println(page)
-	
-	vol := lib.GetHexagon(1).GetWall(2).GetShelf(3).GetVolume(loc)
-	fmt.Println("Volume name:", vol.Name)
+	generatedPage, err := lib.GeneratePage(hex, loc)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Generated page: %s\n", generatedPage)
 
-	hellofs := &Hellofs{}
-	host := fuse.NewFileSystemHost(hellofs)
-	host.Mount("", os.Args[1:])
+	// hellofs := &Hellofs{}
+	// host := fuse.NewFileSystemHost(hellofs)
+	// host.Mount("", os.Args[1:])
 }
