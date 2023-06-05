@@ -3,7 +3,6 @@ package main
 import (
 	// "os"
 	"fmt"
-	
 	"github.com/konata-chan404/LOBFS/babel"
 	"github.com/winfsp/cgofuse/fuse"
 )
@@ -63,20 +62,30 @@ func (self *Hellofs) Readdir(path string,
 }
 
 func main() {
-	lib := babel.NewLibrary(42)
-
-	text := "hello world"
-	hex, loc, page, err := lib.SearchPage(text)
-	if err != nil {
-		panic(err)
+	// Define a valid address
+	addr := babel.Address{
+		Hex:    "23",
+		Wall:   2,
+		Shelf:  4,
+		Volume: 15,
+		Page:   11,
 	}
-	fmt.Printf("Searched text: %q\nHex: %s\nLocation: %+v\nPage: %s\n", text, hex, loc, page)
 
-	generatedPage, err := lib.GeneratePage(hex, loc)
+	// Convert the address to a big integer
+	bi := babel.AddressToBigInt(addr)
+	fmt.Printf("Address as big integer: %s\n", bi.String())
+
+	// Generate a page from the address
+	page, err := babel.GeneratePage(addr)
 	if err != nil {
-		panic(err)
+		fmt.Printf("Error generating page: %v\n", err)
+	} else {
+		fmt.Printf("Generated page: %s\n", string(page))
 	}
-	fmt.Printf("Generated page: %s\n", generatedPage)
+
+	// Convert the big integer back to an address
+	newAddr := babel.BigIntToAddress(bi)
+	fmt.Printf("Reconstructed address: %s\n", newAddr.String())
 
 	// hellofs := &Hellofs{}
 	// host := fuse.NewFileSystemHost(hellofs)

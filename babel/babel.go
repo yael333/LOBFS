@@ -1,150 +1,201 @@
 package babel
 
 import (
+	"crypto/sha256"
+	crand "crypto/rand"
 	"errors"
+	"fmt"
 	"math/big"
-	"math/rand"
+	mrand "math/rand"
 	"strings"
 )
 
 const (
-	Chars             = "abcdefghijklmnopqrstuvwxyz, ."
-	HexBase           = 36
-	LocationMultiplier = 1000
-	PageMultiplier    = 1 << 62
-	MaxLocationValue  = 1000
-	PaddingLength     = 10
+	PAGE_LENGTH = 40 * 80
+	WALLS       = 4
+	SHELVES     = 5
+	VOLUMES     = 32
+	PAGES       = 410
+	MAX_HEX_LEN = 3260
 )
 
-var (
-	charToNum map[rune]*big.Int
-	numToChar map[int32]rune
-)
+var BABEL_SET = []rune{' ', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
+	'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', ',', '.'}
 
-type Hex string
+var HEX_SET = []rune{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+	'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'}
 
-type Location struct {
-	Wall   int
-	Shelf  int
-	Volume int
-	Page   int
+
+type Address struct {
+	Hex    string
+	Wall   uint32
+	Shelf  uint32
+	Volume uint32
+	Page   uint32
 }
 
-type Page string
-
-type Library struct {
-	rand *rand.Rand
+func (a Address) String() string {
+	return fmt.Sprintf("%d:%d:%d:%d:%s", a.Wall, a.Shelf, a.Volume, a.Page, a.Hex)
 }
 
-var ErrInvalidChar = errors.New("invalid character")
 
-func init() {
-	charToNum = make(map[rune]*big.Int, len(Chars))
-	numToChar = make(map[int32]rune, len(Chars))
-	for i, c := range Chars {
-		charToNum[c] = big.NewInt(int64(i))
-		numToChar[int32(i)] = c
+func GeneratePage(addr Address) ([]rune, error) {
+    if addr.Wall >= WALLS {
+        return nil, errors.New("wall number must be between 0 and 3")
+    }
+    if addr.Shelf >= SHELVES {
+        return nil, errors.New("shelf number must be between 0 and 4")
+    }
+    if addr.Volume >= VOLUMES {
+        return nil, errors.New("volume number must be between 0 and 31")
+    }
+    if addr.Page >= PAGES {
+        return nil, errors.New("page number must be between 0 and 409")
+    }
+    if len(addr.Hex) > MAX_HEX_LEN {
+        return nil, errors.New("hex address must be at most 3260 characters")
+    }
+
+    // Convert the address to a big integer
+    bi := AddressToBigInt(addr)
+
+    // Hash the address
+    hash := sha256.Sum256(bi.Bytes())
+    bi = new(big.Int).SetBytes(hash[:])
+
+    // Generate the page content
+    bitLen := bi.BitLen()
+    page := []rune{}
+    base := big.NewInt(int64(len(BABEL_SET)))
+    for i := 0; i < PAGE_LENGTH; i++ {
+        letterIdx := new(big.Int).Mod(bi, base).Int64()
+        page = append(page, BABEL_SET[letterIdx])
+        bi = RotateBigInt(bi, bitLen)
+    }
+
+    // Apply transformation to page
+    page = shuffleRunes(page, bi)
+
+    return page, nil
+}
+
+
+func AddressToBigInt(addr Address) *big.Int {
+	bi := FromHex([]rune(addr.Hex))
+	multiplier := big.NewInt(WALLS * SHELVES * VOLUMES * PAGES)
+	bi.Mul(bi, multiplier)
+	bi.Add(bi, big.NewInt(int64(addr.Wall*SHELVES*VOLUMES*PAGES+addr.Shelf*VOLUMES*PAGES+addr.Volume*PAGES+addr.Page)))
+	return bi
+}
+
+
+func BigIntToAddress(bi *big.Int) Address {
+    pageBI := new(big.Int).Set(bi)
+    pageBI.Mod(pageBI, big.NewInt(PAGES))
+    page := uint32(pageBI.Int64())
+    bi.Div(bi, big.NewInt(PAGES))
+
+    volumeBI := new(big.Int).Set(bi)
+    volumeBI.Mod(volumeBI, big.NewInt(VOLUMES))
+    volume := uint32(volumeBI.Int64())
+    bi.Div(bi, big.NewInt(VOLUMES))
+
+    shelfBI := new(big.Int).Set(bi)
+    shelfBI.Mod(shelfBI, big.NewInt(SHELVES))
+    shelf := uint32(shelfBI.Int64())
+    bi.Div(bi, big.NewInt(SHELVES))
+
+    wallBI := new(big.Int).Set(bi)
+    wallBI.Mod(wallBI, big.NewInt(WALLS))
+    wall := uint32(wallBI.Int64())
+    bi.Div(bi, big.NewInt(WALLS))
+
+    // The remaining part of the BigInt is the Hex
+    hex := ToHex(bi)
+
+    return Address{Hex: string(hex), Wall: wall, Shelf: shelf, Volume: volume, Page: page}
+}
+
+func Search(content string) Address {
+	// Generate a random number between 0 and the number of remaining positions after placing the content
+	randPos, err := crand.Int(crand.Reader, big.NewInt(int64(PAGE_LENGTH-len(content))))
+	if err != nil {
+		panic(err)
 	}
-}
 
-func (h Hex) ToBigInt() (*big.Int, error) {
-	n := new(big.Int)
-	_, ok := n.SetString(string(h), HexBase)
-	if !ok {
-		return nil, ErrInvalidChar
+	// Split the page into two parts at the random position
+	padBeforeLen := randPos.Uint64()
+	padAfterLen := PAGE_LENGTH - padBeforeLen - uint64(len(content))
+
+	// Pad content to PAGE_LENGTH with spaces at random position
+	paddedContent := strings.Repeat(" ", int(padBeforeLen)) + content + strings.Repeat(" ", int(padAfterLen))
+
+	// Convert paddedContent into a big integer in the base of BABEL_SET
+	bi := new(big.Int)
+	for _, char := range paddedContent {
+		bi.Mul(bi, big.NewInt(int64(len(BABEL_SET))))
+		bi.Add(bi, big.NewInt(int64(indexOf(BABEL_SET, char))))
 	}
-	return n, nil
+
+	// Convert big integer into an address
+	addr := BigIntToAddress(bi)
+	return addr
 }
 
-func (l Location) ToBigInt() *big.Int {
-	n := big.NewInt(int64(l.Wall))
-	n.Mul(n, big.NewInt(LocationMultiplier))
-	n.Add(n, big.NewInt(int64(l.Shelf)))
-	n.Mul(n, big.NewInt(LocationMultiplier))
-	n.Add(n, big.NewInt(int64(l.Volume)))
-	n.Mul(n, big.NewInt(LocationMultiplier))
-	n.Add(n, big.NewInt(int64(l.Page)))
-	return n
+
+func ToHex(bi *big.Int) []rune {
+	base := big.NewInt(int64(len(HEX_SET)))
+	zero := big.NewInt(0)
+	res := []rune{}
+	for bi.Cmp(zero) > 0 {
+		mod := &big.Int{}
+		bi.DivMod(bi, base, mod)
+		res = append([]rune{HEX_SET[mod.Int64()]}, res...)
+	}
+	return res
 }
 
-func (p Page) ToBigInt() (*big.Int, error) {
-	n := new(big.Int)
-	for _, c := range p {
-		v, ok := charToNum[c]
-		if !ok {
-			return nil, ErrInvalidChar
+func FromHex(r []rune) *big.Int {
+	base := big.NewInt(int64(len(HEX_SET)))
+	bi := big.NewInt(0)
+	for _, v := range r {
+		index := indexOf(HEX_SET, v)
+		if index == -1 {
+			panic(fmt.Sprintf("invalid character %c in hex string", v))
 		}
-		n.Mul(n, big.NewInt(int64(len(Chars))))
-		n.Add(n, v)
+		bi.Mul(bi, base)
+		value := big.NewInt(int64(index))
+		bi.Add(bi, value)
 	}
-	return n, nil
+	return bi
 }
 
-func (p *Page) FromBigInt(n *big.Int) {
-	var s strings.Builder
-	mod := new(big.Int)
-	for n.BitLen() > 0 {
-		n, mod = n.DivMod(n, big.NewInt(int64(len(Chars))), mod)
-		s.WriteRune(numToChar[int32(mod.Int64())])
+
+func RotateBigInt(bi *big.Int, bitLen int) *big.Int {
+    rotationAmount := int(bi.Mod(bi, big.NewInt(int64(bitLen))).Int64())
+    shifted := new(big.Int).Lsh(bi, uint(rotationAmount))
+    msb := new(big.Int).Rsh(bi, uint(bitLen-rotationAmount))
+    rotated := new(big.Int).Or(shifted, msb)
+    return rotated
+}
+
+func shuffleRunes(runes []rune, bi *big.Int) []rune {
+    r := mrand.New(mrand.NewSource(bi.Int64()))
+
+    // Fisher-Yates shuffle
+    for i := len(runes) - 1; i > 0; i-- {
+        j := r.Intn(i + 1)
+        runes[i], runes[j] = runes[j], runes[i]
+    }
+
+    return runes
+}
+
+func indexOf(runes []rune, target rune) int {
+	for i, v := range runes {
+		if v == target {
+			return i
+		}
 	}
-	*p = Page(s.String())
+	return -1
 }
-
-func NewLibrary(seed int64) *Library {
-	return &Library{rand: rand.New(rand.NewSource(seed))}
-}
-
-func (lib *Library) GeneratePage(h Hex, l Location) (Page, error) {
-	hexNum, err := h.ToBigInt()
-	if err != nil {
-		return "", err
-	}
-	locNum := l.ToBigInt()
-
-	pageNum := new(big.Int).Mul(locNum, big.NewInt(PageMultiplier))
-	pageNum.Add(pageNum, hexNum)
-
-	p := new(Page)
-	p.FromBigInt(pageNum)
-	return *p, nil
-}
-
-func (lib *Library) SearchPage(text string) (h Hex, l Location, p Page, err error) {
-	text = lib.padText(text)
-
-	p = Page(text)
-	pageNum, err := p.ToBigInt()
-	if err != nil {
-		return
-	}
-
-	l = Location{
-		Wall:   lib.rand.Intn(MaxLocationValue),
-		Shelf:  lib.rand.Intn(MaxLocationValue),
-		Volume: lib.rand.Intn(MaxLocationValue),
-		Page:   lib.rand.Intn(MaxLocationValue),
-	}
-	locNum := l.ToBigInt()
-
-	hexNum := new(big.Int).Add(pageNum, new(big.Int).Mul(locNum, big.NewInt(PageMultiplier)))
-	h = Hex(hexNum.Text(HexBase))
-
-	return
-}
-
-
-
-func (lib *Library) randString(n int) string {
-	var s strings.Builder
-	for i := 0; i < n; i++ {
-		s.WriteRune(rune(Chars[lib.rand.Intn(len(Chars))]))
-	}
-	return s.String()
-}
-
-func (lib *Library) padText(text string) string {
-	prefix := lib.randString(PaddingLength)
-	suffix := lib.randString(PaddingLength)
-	return prefix + text + suffix
-}
-
