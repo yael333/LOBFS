@@ -1,4 +1,4 @@
-# LOBFS (Library of Babel File System)
+# 📂LOBFS (Library of Babel File System)
 
 LOBFS is a filesystem implementation that brings Jorge Luis Borges' Library of Babel to your local machine. With LOBFS, you can explore the endless possibilities of the Library of Babel as if it were a file system on your computer. It's entirely written in Golang from scratch, with design choices deviating from the mainstream Javascript implementation.
 
@@ -6,6 +6,7 @@ LOBFS is a filesystem implementation that brings Jorge Luis Borges' Library of B
 - Treats the Library of Babel as a hierarchical filesystem, allowing navigation through hexagon (hex), wall, shelf, volume, and page identifiers.
 - Uses the FUSE (Filesystem in User Space) interface to integrate with your Windows, Linux, \*BSD and MacOS (untested) systems.
 - Allows reading of any "page" in the library determenistically using normal OS-level API.
+
 
 https://github.com/konata-chan404/LOBFS/assets/42537566/6fe72509-0dee-4f1c-ab1b-a490fda8e9f2
 
