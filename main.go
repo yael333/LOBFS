@@ -89,8 +89,7 @@ func (self *BabelFS) Read(path string, buff []byte, ofst int64, fh uint64) (n in
 			log.Printf("[<3] Successfully read from path: %s\n", path)
 			return int(end - ofst)
 		}
-	}
-	else {
+	} else {
 		log.Printf("[</3] Failed to read from path: %s\n", path)
 	}
 	return 0
