@@ -229,6 +229,7 @@ func Search(content string) Address {
 
 	return addr
 }
+
 // ToHex converts a big integer to a hexadecimal representation.
 func ToHex(bi *big.Int) []rune {
 	base := big.NewInt(int64(len(HEX_SET)))
