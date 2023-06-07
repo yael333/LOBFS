@@ -145,5 +145,4 @@ func main() {
 	fs := &BabelFS{}
 	host := fuse.NewFileSystemHost(fs)
 	host.Mount("", os.Args[1:])
-	log.Println("[<3] LOBFS successfully mounted and running.")
 }
