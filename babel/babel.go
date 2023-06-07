@@ -179,33 +179,56 @@ func BigIntToAddress(bi *big.Int) Address {
     return Address{Hex: string(hex), Wall: wall, Shelf: shelf, Volume: volume, Page: page}
 }
 
+// PadContent pads a given content with a random amount of characters on its front and back side, or in the case of a Page, it's padded with spaces on its back side.
+func PadContent(content string, padChar rune) string {
+	// Calculate the padding lengths for the front and back
+	frontPadLen := mrand.Intn(PAGE_LENGTH - len(content))
+	backPadLen := PAGE_LENGTH - frontPadLen - len(content)
+
+	// Generate the padded content
+	paddedContent := strings.Repeat(string(padChar), frontPadLen) + content + strings.Repeat(" ", backPadLen)
+
+	return paddedContent
+}
+
+// BigIntFromString converts a string to a *big.Int using a character set.
+func BigIntFromString(s string, charSet []rune) *big.Int {
+	bi := new(big.Int)
+	for _, char := range s {
+		bi.Mul(bi, big.NewInt(int64(len(charSet))))
+		bi.Add(bi, big.NewInt(int64(indexOf(charSet, char))))
+	}
+	return bi
+}
+
 // Search finds an address for the given content.
 func Search(content string) Address {
-	// Generate a random number between 0 and the number of remaining positions after placing the content
-	randPos, err := crand.Int(crand.Reader, big.NewInt(int64(PAGE_LENGTH - len(content))))
+	// Pad the content to PAGE_LENGTH with spaces at a random position
+	paddedContent := PadContent(content, ' ')
+
+	// Convert paddedContent into a big integer in the base of BABEL_SET
+	contentBi := BigIntFromString(paddedContent, BABEL_SET)
+
+	// Generate a random number in the range of each location value
+	locRand, err := crand.Int(crand.Reader, big.NewInt(int64(WALLS * SHELVES * VOLUMES * PAGES)))
 	if err != nil {
 		panic(err)
 	}
 
-	// Split the page into two parts at the random position
-	padBeforeLen := randPos.Uint64()
-	padAfterLen := PAGE_LENGTH - padBeforeLen - uint64(len(content))
+	// Multiply the location number by a very large number (contentBi)
+	locRand.Mul(locRand, contentBi)
 
-	// Pad content to PAGE_LENGTH with spaces at random position
-	paddedContent := strings.Repeat(" ", int(padBeforeLen)) + content + strings.Repeat(" ", int(padAfterLen))
-
-	// Convert paddedContent into a big integer in the base of BABEL_SET
-	bi := new(big.Int)
-	for _, char := range paddedContent {
-		bi.Mul(bi, big.NewInt(int64(len(BABEL_SET))))
-		bi.Add(bi, big.NewInt(int64(indexOf(BABEL_SET, char))))
-	}
+	// Convert the new content number into base-36
+	content36 := locRand.Text(36)
 
 	// Convert big integer into an address
-	addr := BigIntToAddress(bi)
+	addr := BigIntToAddress(locRand)
+
+	// Assign base-36 representation to Hex field
+	addr.Hex = content36
+
 	return addr
 }
-
 // ToHex converts a big integer to a hexadecimal representation.
 func ToHex(bi *big.Int) []rune {
 	base := big.NewInt(int64(len(HEX_SET)))
