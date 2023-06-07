@@ -1,17 +1,18 @@
 package babel
 
 import (
-	"crypto/sha256"
 	crand "crypto/rand"
 	"errors"
 	"fmt"
 	"math/big"
 	mrand "math/rand"
 	"strings"
+	"strconv"
 )
 
 const (
 	PAGE_LENGTH = 40 * 80
+	TITLE_LENGTH = 20
 	WALLS       = 4
 	SHELVES     = 5
 	VOLUMES     = 32
@@ -34,61 +35,123 @@ type Address struct {
 	Page   uint32
 }
 
+// String returns the string representation of an Address.
 func (a Address) String() string {
 	return fmt.Sprintf("%d:%d:%d:%d:%s", a.Wall, a.Shelf, a.Volume, a.Page, a.Hex)
 }
 
+// ValidateWall checks if the wall number is valid.
+func ValidateWall(wall uint32) error {
+	if wall >= WALLS {
+		return errors.New("invalid wall number: must be between 0 and 3")
+	}
+	return nil
+}
 
+// ValidateShelf checks if the shelf number is valid.
+func ValidateShelf(shelf uint32) error {
+	if shelf >= SHELVES {
+		return errors.New("invalid shelf number: must be between 0 and 4")
+	}
+	return nil
+}
+
+// ValidateVolume checks if the volume number is valid.
+func ValidateVolume(volume uint32) error {
+	if volume >= VOLUMES {
+		return errors.New("invalid volume number: must be between 0 and 31")
+	}
+	return nil
+}
+
+// ValidatePage checks if the page number is valid.
+func ValidatePage(page uint32) error {
+	if page >= PAGES {
+		return errors.New("invalid page number: must be between 0 and 409")
+	}
+	return nil
+}
+
+// ValidateHex checks if the hex string is valid.
+func ValidateHex(hex string) error {
+	if len(hex) > MAX_HEX_LEN {
+		return errors.New("invalid hex: length must be at most 3260 characters")
+	}
+	return nil
+}
+
+// GeneratePage generates a page content for the given address.
 func GeneratePage(addr Address) ([]rune, error) {
-    if addr.Wall >= WALLS {
-        return nil, errors.New("wall number must be between 0 and 3")
+    if err := ValidateWall(addr.Wall); err != nil {
+        return nil, err
     }
-    if addr.Shelf >= SHELVES {
-        return nil, errors.New("shelf number must be between 0 and 4")
+    if err := ValidateShelf(addr.Shelf); err != nil {
+        return nil, err
     }
-    if addr.Volume >= VOLUMES {
-        return nil, errors.New("volume number must be between 0 and 31")
+    if err := ValidateVolume(addr.Volume); err != nil {
+        return nil, err
     }
-    if addr.Page >= PAGES {
-        return nil, errors.New("page number must be between 0 and 409")
-    }
-    if len(addr.Hex) > MAX_HEX_LEN {
-        return nil, errors.New("hex address must be at most 3260 characters")
+    if err := ValidatePage(addr.Page); err != nil {
+        return nil, err
     }
 
-    // Convert the address to a big integer
-    bi := AddressToBigInt(addr)
+    // Construct unique identifier for this volume
+	uniqueId := addr.Wall * SHELVES * VOLUMES * PAGES + addr.Shelf * VOLUMES * PAGES + addr.Volume * PAGES + addr.Page
 
-    // Hash the address
-    hash := sha256.Sum256(bi.Bytes())
-    bi = new(big.Int).SetBytes(hash[:])
+    // Use the unique identifier as the seed for a new PRNG
+    rng := mrand.New(mrand.NewSource(int64(uniqueId)))
 
     // Generate the page content
-    bitLen := bi.BitLen()
     page := []rune{}
-    base := big.NewInt(int64(len(BABEL_SET)))
     for i := 0; i < PAGE_LENGTH; i++ {
-        letterIdx := new(big.Int).Mod(bi, base).Int64()
+        letterIdx := rng.Intn(len(BABEL_SET))
         page = append(page, BABEL_SET[letterIdx])
-        bi = RotateBigInt(bi, bitLen)
     }
-
-    // Apply transformation to page
-    page = shuffleRunes(page, bi)
 
     return page, nil
 }
 
+// GenerateTitle generates a title for the given address.
+func GenerateTitle(addr Address) ([]rune, error) {
+    if err := ValidateWall(addr.Wall); err != nil {
+        return nil, err
+    }
+    if err := ValidateShelf(addr.Shelf); err != nil {
+        return nil, err
+    }
+    if err := ValidateVolume(addr.Volume); err != nil {
+        return nil, err
+    }
+    if err := ValidatePage(addr.Page); err != nil {
+        return nil, err
+    }
 
+    // Construct unique identifier for this volume
+    uniqueId := addr.Wall * SHELVES * VOLUMES + addr.Shelf * VOLUMES + addr.Volume
+
+    // Use the unique identifier as the seed for a new PRNG
+    rng := mrand.New(mrand.NewSource(int64(uniqueId)))
+
+    // Generate the page content
+    page := []rune{}
+    for i := 0; i < TITLE_LENGTH; i++ {
+        letterIdx := rng.Intn(len(BABEL_SET))
+        page = append(page, BABEL_SET[letterIdx])
+    }
+
+    return page, nil
+}
+
+// AddressToBigInt converts an Address to a big integer.
 func AddressToBigInt(addr Address) *big.Int {
 	bi := FromHex([]rune(addr.Hex))
 	multiplier := big.NewInt(WALLS * SHELVES * VOLUMES * PAGES)
 	bi.Mul(bi, multiplier)
-	bi.Add(bi, big.NewInt(int64(addr.Wall*SHELVES*VOLUMES*PAGES+addr.Shelf*VOLUMES*PAGES+addr.Volume*PAGES+addr.Page)))
+	bi.Add(bi, big.NewInt(int64(addr.Wall * SHELVES * VOLUMES * PAGES + addr.Shelf * VOLUMES * PAGES + addr.Volume * PAGES + addr.Page)))
 	return bi
 }
 
-
+// BigIntToAddress converts a big integer to an Address.
 func BigIntToAddress(bi *big.Int) Address {
     pageBI := new(big.Int).Set(bi)
     pageBI.Mod(pageBI, big.NewInt(PAGES))
@@ -116,9 +179,10 @@ func BigIntToAddress(bi *big.Int) Address {
     return Address{Hex: string(hex), Wall: wall, Shelf: shelf, Volume: volume, Page: page}
 }
 
+// Search finds an address for the given content.
 func Search(content string) Address {
 	// Generate a random number between 0 and the number of remaining positions after placing the content
-	randPos, err := crand.Int(crand.Reader, big.NewInt(int64(PAGE_LENGTH-len(content))))
+	randPos, err := crand.Int(crand.Reader, big.NewInt(int64(PAGE_LENGTH - len(content))))
 	if err != nil {
 		panic(err)
 	}
@@ -142,7 +206,7 @@ func Search(content string) Address {
 	return addr
 }
 
-
+// ToHex converts a big integer to a hexadecimal representation.
 func ToHex(bi *big.Int) []rune {
 	base := big.NewInt(int64(len(HEX_SET)))
 	zero := big.NewInt(0)
@@ -155,6 +219,7 @@ func ToHex(bi *big.Int) []rune {
 	return res
 }
 
+// FromHex converts a hexadecimal representation to a big integer.
 func FromHex(r []rune) *big.Int {
 	base := big.NewInt(int64(len(HEX_SET)))
 	bi := big.NewInt(0)
@@ -170,15 +235,68 @@ func FromHex(r []rune) *big.Int {
 	return bi
 }
 
+// ParseAddress parses an address string into an Address struct.
+func ParseAddress(addrStr string) (Address, error) {
+	// Split the string into parts
+	parts := strings.Split(addrStr, "/")
 
-func RotateBigInt(bi *big.Int, bitLen int) *big.Int {
-    rotationAmount := int(bi.Mod(bi, big.NewInt(int64(bitLen))).Int64())
+	// Create an address with all fields set to zero
+	addr := Address{}
+
+	// Set the hex field, if it exists
+	if len(parts) > 0 && len(parts[0]) > 0 {
+		addr.Hex = parts[0]
+	}
+
+	// Set the wall field, if it exists
+	if len(parts) > 1 && len(parts[1]) > 0 {
+		wall, err := strconv.ParseUint(parts[1], 10, 32)
+		if err != nil {
+			return Address{}, err
+		}
+		addr.Wall = uint32(wall)
+	}
+
+	// Set the shelf field, if it exists
+	if len(parts) > 2 && len(parts[2]) > 0 {
+		shelf, err := strconv.ParseUint(parts[2], 10, 32)
+		if err != nil {
+			return Address{}, err
+		}
+		addr.Shelf = uint32(shelf)
+	}
+
+	// Set the volume field, if it exists
+	if len(parts) > 3 && len(parts[3]) > 0 {
+		volume, err := strconv.ParseUint(parts[3], 10, 32)
+		if err != nil {
+			return Address{}, err
+		}
+		addr.Volume = uint32(volume)
+	}
+
+	// Set the page field, if it exists
+	if len(parts) > 4 && len(parts[4]) > 0 {
+		page, err := strconv.ParseUint(parts[4], 10, 32)
+		if err != nil {
+			return Address{}, err
+		}
+		addr.Page = uint32(page)
+	}
+
+	return addr, nil
+}
+
+// RotateBigInt rotates a big integer by a certain number of bits.
+func RotateBigInt(bi *big.Int, bitLen int, pageNum uint32) *big.Int {
+    rotationAmount := int(new(big.Int).Add(bi, big.NewInt(int64(pageNum))).Mod(bi, big.NewInt(int64(bitLen))).Int64())
     shifted := new(big.Int).Lsh(bi, uint(rotationAmount))
     msb := new(big.Int).Rsh(bi, uint(bitLen-rotationAmount))
     rotated := new(big.Int).Or(shifted, msb)
     return rotated
 }
 
+// shuffleRunes shuffles the order of runes using a random number generator.
 func shuffleRunes(runes []rune, bi *big.Int) []rune {
     r := mrand.New(mrand.NewSource(bi.Int64()))
 
@@ -191,6 +309,7 @@ func shuffleRunes(runes []rune, bi *big.Int) []rune {
     return runes
 }
 
+// indexOf returns the index of a rune in a rune slice.
 func indexOf(runes []rune, target rune) int {
 	for i, v := range runes {
 		if v == target {
