@@ -39,7 +39,6 @@ func (self *BabelFS) Open(path string, flags int) (errc int, fh uint64) {
 	_, isFile := self.find(path)
 
 	if isFile {
-		log.Printf("[<3] Successfully opened file: %s\n", path)
 		return 0, 0
 	}
 
@@ -77,7 +76,6 @@ func (self *BabelFS) Read(path string, buff []byte, ofst int64, fh uint64) (n in
 	if isFile {
 		page, err := babel.GeneratePage(address)
 		if err != nil {
-			log.Printf("[</3] Failed to generate page for address: %+v. Error: %v\n", address, err)
 			return 0
 		}
 
@@ -92,8 +90,9 @@ func (self *BabelFS) Read(path string, buff []byte, ofst int64, fh uint64) (n in
 			return int(end - ofst)
 		}
 	}
-
-	log.Printf("[</3] Failed to read from path: %s\n", path)
+	else {
+		log.Printf("[</3] Failed to read from path: %s\n", path)
+	}
 	return 0
 }
 
